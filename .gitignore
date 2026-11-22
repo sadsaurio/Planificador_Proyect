@@ -1,0 +1,43 @@
+# Visual Studio
+.vs/
+*.user
+*.suo
+*.vcxproj.user
+*.aps
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+ipch/
+
+# Salida de compilación
+Debug/
+Release/
+x64/
+x86/
+bin/
+obj/
+[Bb]uild/
+*.exe
+*.obj
+*.o
+*.pdb
+*.ilk
+*.idb
+*.lib
+*.exp
+*.log
+*.tlog
+*.ipdb
+*.iobj
+
+# Paquetes NuGet (Allegro por NuGet se restaura solo)
+packages/
+*.nupkg
+
+# Archivos temporales y del sistema
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store

@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="Planificador SO/Planificador SO.vcxproj" Id="d861a5a5-6fad-49e2-835f-7dc468a39b7a" />
+</Solution>
