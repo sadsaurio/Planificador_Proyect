@@ -41,6 +41,17 @@ struct recuadro {
 	float x1, y1, x2, y2;
 };
 
+struct Opcion {
+	float x1, y1, radio;
+	string texto;
+	bool activo;
+	int memoria;
+
+	bool contiene(float x, float y) const {
+		return x >= x1-radio && x <= x1+radio && y >= y1-radio && y <= y1+radio;
+	}
+};
+
 class Pantalla {
 protected:
 	ALLEGRO_DISPLAY* display;
@@ -88,6 +99,12 @@ public:
 
 class PantallaUni : public Pantalla {
 private:
+	vector<Opcion> opcion = {
+		{ 300, 200, 15, "1 MB", false, 1024 },
+		{ 300, 240, 15, "4 MB", false, 4096 },
+		{ 300, 280, 15, "8 MB", true, 8192 }
+	};
+
 	vector<Proceso> memoria = { { 0, 8192, 0 } }; // id = 0  Hueco
 	vector<Proceso> roundRobin; // fila de listos
 	vector<boton> botonesForm = { 
@@ -108,10 +125,15 @@ private:
 		{ 1220, 800, 1420, 850, "Terminar" },
 		{ 1520, 800, 1720, 850, "Consola" }
 	};
+
+	vector<boton> consolaB = {
+		{ 1800, 15, 1850, 65, "A"},
+		{ 1800, 650, 1850, 700, "V" }
+	};
 	recuadro recuadroMemoria = { 600, 150, 1400, 200 };
 
 	int quantumSistema = 0, quantumProceso = 0, tamanoMax = 0, tamanoMem = 8192; //quantum proceso es tamano maximo de quantum por proceso. quantum sistema es lo que le damos de cpu a cada proceso
-	
+	int contProcesos = 0;
 	bool firstBest = false; // false = First Fit, true = Best Fit
 
 	/* Stats */
@@ -121,7 +143,9 @@ private:
 	/* Consola */
 	queue<string> salidaConsola; 
 	float x1C = 1450.0, y1C = 200.0, x2C = 2000.0, y2C = 730.0;
-	int maxP = 18;
+	bool autoScroll = true;
+
+	int maxP = 17, inicioC = 0;
 
 public:
 
@@ -136,6 +160,11 @@ public:
 			}
 		}
 		condensar();
+	}
+	void confTam() {
+		int n = salidaConsola.size();
+		if (autoScroll) inicioC = max(0, n - maxP);
+		else inicioC = min(inicioC, max(0, n - maxP)); // clamp
 	}
 
 	void condensar() {
@@ -207,20 +236,24 @@ public:
 			espera.tamano = tamano;
 			espera.quantum = quantum;
 			salidaConsola.push("En espera [" + to_string(espera.ID) + ',' + to_string(espera.tamano) + ',' + to_string(espera.quantum) + ']');
+			proSinEntrar++;
 			return;
 		}
 		for (size_t i = 0; i < memoria.size(); i++) {
 			if (memoria[i].ID == 0 && memoria[i].tamano >= espera.tamano) {
-				int sobrante = memoria[i].tamano - tamano;
+				int sobrante = memoria[i].tamano - espera.tamano;
 				memoria[i] = { espera.ID, espera.tamano, espera.quantum };
 				if (sobrante > 0)
 					memoria.insert(memoria.begin() + i + 1, Proceso{ 0, sobrante, 0 });
 				anadirACola(espera.ID, espera.tamano, espera.quantum);
 				espera = { 0,0,0 };
+				contProcesos--;
 				return;
 			}
 		}
 		salidaConsola.push("En espera [" + to_string(espera.ID) + ',' + to_string(espera.tamano) + ',' + to_string(espera.quantum) + ']');
+		contProcesos--;
+		proSinEntrar++;
 		return;
 	}
 	void bestFit(int id, int tamano, int quantum) {
@@ -234,7 +267,6 @@ public:
 				}
 			}
 			if (mejorIndice != -1) {
-				anadirACola(id, tamano, quantum);
 				if (memoria[mejorIndice].tamano > tamano) {
 					Proceso hueco = { 0, memoria[mejorIndice].tamano - tamano, 0 };
 					memoria.insert(memoria.begin() + mejorIndice + 1, hueco);
@@ -242,6 +274,7 @@ public:
 				memoria[mejorIndice].ID = id;
 				memoria[mejorIndice].tamano = tamano;
 				memoria[mejorIndice].quantum = quantum;
+				anadirACola(id, tamano, quantum);
 				return;
 			}
 		}
@@ -250,18 +283,18 @@ public:
 			espera.tamano = tamano;
 			espera.quantum = quantum;
 			salidaConsola.push("En espera [" + to_string(espera.ID) + ',' + to_string(espera.tamano) + ',' + to_string(espera.quantum) + ']');
+			proSinEntrar++;
 			return;
 		}
 		int mejorIndice = -1;
 		int mejorTamano = tamanoMem + 1; // Inicializar con un tamaño mayor al máximo, si no cabe en memoria no se asigna
 		for (int i = 0; i < memoria.size(); ++i) {
-			if (memoria[i].ID == 0 && memoria[i].tamano >= tamano && memoria[i].tamano < mejorTamano) {
+			if (memoria[i].ID == 0 && memoria[i].tamano >= espera.tamano && memoria[i].tamano < mejorTamano) {
 				mejorTamano = memoria[i].tamano;
 				mejorIndice = i;
 			}
 		}
 		if (mejorIndice != -1) {
-			anadirACola(espera.ID, espera.tamano, espera.quantum);
 			if (memoria[mejorIndice].tamano > espera.tamano) {
 				Proceso hueco = { 0, memoria[mejorIndice].tamano - espera.tamano, 0 };
 				memoria.insert(memoria.begin() + mejorIndice + 1, hueco);
@@ -269,17 +302,19 @@ public:
 			memoria[mejorIndice].ID = espera.ID;
 			memoria[mejorIndice].tamano = espera.tamano;
 			memoria[mejorIndice].quantum = espera.quantum;
+			anadirACola(espera.ID, espera.tamano, espera.quantum);
 			espera = { 0,0,0 };
+			contProcesos--;
 			return;
 		}
 		salidaConsola.push("En espera [" + to_string(espera.ID) + ',' + to_string(espera.tamano) + ',' + to_string(espera.quantum) + ']');
+		contProcesos--;
+		proSinEntrar++;
 		return;
 	}
 
 
 	void evento(const ALLEGRO_EVENT& ev, Pantalla*& pantalla) override {
-		
-
 		if (!ejecutando) {
 			if (ev.type == ALLEGRO_EVENT_MOUSE_BUTTON_DOWN) {
 				float x = ev.mouse.x;
@@ -321,6 +356,32 @@ public:
 						}
 					}
 				}
+				for (auto& o : opcion) {
+					if (o.contiene(x, y)) {
+						if (o.texto == "1 MB") {
+							opcion[0].activo = true;
+							opcion[1].activo = false;
+							opcion[2].activo = false;
+
+							memoria[0].tamano = o.memoria;
+							tamanoMem = o.memoria;
+						} else if (o.texto == "4 MB") {
+							opcion[0].activo = false;
+							opcion[1].activo = true;
+							opcion[2].activo = false;
+
+							memoria[0].tamano = o.memoria;
+							tamanoMem = o.memoria;
+						} else if (o.texto == "8 MB") {
+							opcion[0].activo = false;
+							opcion[1].activo = false;
+							opcion[2].activo = true;
+
+							memoria[0].tamano = o.memoria;
+							tamanoMem = o.memoria;
+						}
+					}
+				}
 			}
 			else if (ev.type == ALLEGRO_EVENT_KEY_CHAR) {
 				for (auto& campo : camposForm) {
@@ -337,8 +398,8 @@ public:
 		}
 		else if (ev.type == ALLEGRO_EVENT_TIMER) {
 			
-			int id = rand() % 1000 + 1;
-			int tamano = rand() % tamanoMax + 100;
+			int id = ++contProcesos;
+			int tamano = rand() % tamanoMax;
 			int quantum = rand() % quantumProceso + 1;
 			if (firstBest)
 				bestFit(id, tamano, quantum);
@@ -368,17 +429,18 @@ public:
 						al_set_timer_speed(getTimer(), getVelocidad());
 					}
 					else if (b.texto == "Consola") {
-						if (maxP == 18) {
+						if (maxP == 17) {
 							x1C = 0;
 							y1C = 0;
-							maxP = 25;
+							maxP = 24;
+
 						}
 						else {
 							x1C = 1450.0;
 							y1C = 200.0;
 							x2C = 2000.0;
 							y2C = 730.0;
-							maxP = 18;
+							maxP = 17;
 						}
 					}
 					else if (b.texto == "Terminar") {
@@ -387,12 +449,21 @@ public:
 						memoria.clear();
 						memoria.push_back({ 0, 8192, 0 });
 						roundRobin.clear();
-						al_show_native_message_box(display, "Simulación terminada", "Estadisticas: ", ("Procesos atendidos: " + to_string(procesosAtendidos) + "\nProcesos sin entrar: " + to_string(proSinEntrar) + "\nMemoria ocupada promedio: " + to_string((int)(memOcupPor / (proTotal + 1))) + "%").c_str(), NULL, 0);
+						al_show_native_message_box(display, "Simulación terminada", "Estadisticas: ", ("Procesos atendidos: " + to_string(procesosAtendidos) + "\nCiclos con procesos en espera: " + to_string(proSinEntrar) + "\nMemoria ocupada promedio: " + to_string((int)(memOcupPor / (proTotal + 1))) + "%").c_str(), NULL, 0);
 						procesosAtendidos = 0;
 						proSinEntrar = 0;
 						memOcupada = 0;
 						proTotal = 0;
 						memOcupPor = 0;
+						inicioC = 0; maxP = 17; 
+						autoScroll = true;
+						x1C = 1450.0; 
+						y1C = 200.0;
+						contProcesos = 0;
+						opcion[0].activo = false;
+						opcion[1].activo = false;
+						opcion[2].activo = true;
+						tamanoMem = 8192;
 						while (!salidaConsola.empty())
 							salidaConsola.pop();
 						for (auto& campo : camposForm) {
@@ -402,15 +473,46 @@ public:
 					}
 				}
 			}
+			if (maxP > 17) {
+				for (auto& b : consolaB) {
+					if (b.contiene(x, y)) {
+						if (b.texto == "A") {
+							autoScroll = false;
+							if (inicioC - 4 >= 0)
+								inicioC -= 4;
+							else
+								inicioC = 0;
+
+						}
+						else if (b.texto == "V") {
+							if (inicioC + 4 <= salidaConsola.size())
+								inicioC += 4;
+							else
+								inicioC = salidaConsola.size() ;
+							if (inicioC == salidaConsola.size() - maxP)
+								autoScroll = true;
+						}
+					}
+					
+				}
+			}
 		}
 	}
 
 	void escribirConsola(ALLEGRO_FONT* fuente) {
 		queue<string> aux = salidaConsola;
 		string aux2;
-		for (int i = 0; i < salidaConsola.size(); i++) {
-			al_draw_text(fuente, al_map_rgb(43, 141, 42), x1C+15, y1C + 30*i + 5, ALLEGRO_ALIGN_LEFT, (aux.front()).c_str());
-			aux.pop();
+		confTam();
+		if (!salidaConsola.empty()) {
+			for (int i = 0; i < inicioC; i++) {
+				aux.pop();
+			}
+			int n = aux.size();
+			for (int i = 0; i < n && i < maxP; i++) {
+				al_draw_text(fuente, al_map_rgb(43, 141, 42), x1C+15, y1C + 30*i + 5, ALLEGRO_ALIGN_LEFT, (aux.front()).c_str());
+				aux.pop();
+			}
+
 		}
 	}
 
@@ -430,6 +532,13 @@ public:
 
 
 		if (!ejecutando) {
+			for (auto& o : opcion) {
+				if (o.activo) {
+					al_draw_filled_circle(o.x1,o.y1,o.radio, al_map_rgb(0,255,255));
+				}
+				al_draw_circle(o.x1, o.y1, o.radio, al_map_rgb(25, 25, 112),2);
+				al_draw_text(fuente, al_map_rgb(0, 0, 0), o.x1 + o.radio * 2, o.y1 - o.radio, ALLEGRO_ALIGN_LEFT, o.texto.c_str());
+			}
 			for (auto& campo : camposForm) {
 				al_draw_filled_rectangle(campo.x2, campo.y1, campo.x3, campo.y2, al_map_rgb(255, 255, 255));
 				al_draw_rectangle(campo.x2, campo.y1, campo.x3, campo.y2, al_map_rgb(0, 0, 0), 2);
@@ -494,14 +603,19 @@ public:
 
 			/* Stats */
 			al_draw_text(fuente, al_map_rgb(0, 0, 0), 1000, 460, ALLEGRO_ALIGN_LEFT, ("Procesos atendidos: " + to_string(procesosAtendidos)).c_str());
-			al_draw_text(fuente, al_map_rgb(0, 0, 0), 1000, 490, ALLEGRO_ALIGN_LEFT, ("Procesos sin entrar: " + to_string(proSinEntrar)).c_str());
+			al_draw_text(fuente, al_map_rgb(0, 0, 0), 1000, 490, ALLEGRO_ALIGN_LEFT, ("Ciclos esperando: " + to_string(proSinEntrar)).c_str());
 			al_draw_text(fuente, al_map_rgb(0, 0, 0), 1000, 520, ALLEGRO_ALIGN_LEFT, ("Memoria ocupada: " + to_string((int)memOcupada) + "%").c_str());
 
 			/*  Salida tipo consola  */
 			al_draw_filled_rectangle(x1C, y1C, x2C, y2C, al_map_rgb(20, 20, 20));
+			if (maxP > 17) {
+				for (auto& b : consolaB) {
+					al_draw_filled_rectangle(b.x1, b.y1, b.x2, b.y2, al_map_rgb(255,255,255));
+					al_draw_text(fuente, al_map_rgb(0, 0, 0), (b.x2 - b.x1) / 2 + b.x1, (b.y2 - b.y1) / 2 + b.y1, ALLEGRO_ALIGN_CENTER,(b.texto).c_str());
+				}
+			}
 
-			while (salidaConsola.size() > maxP)
-				salidaConsola.pop();
+			
 			escribirConsola(fuente);
 
 		}
